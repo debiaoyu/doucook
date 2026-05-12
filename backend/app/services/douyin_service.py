@@ -1,5 +1,6 @@
 import os
 import re
+import hashlib
 from pathlib import Path
 from typing import Optional
 
@@ -80,6 +81,7 @@ class DouyinService:
         client = DouyinClient(cookies_file=cf)
 
         resolved_url = client.resolve_url(url)
+        os.makedirs(output_dir, exist_ok=True)
         DETECT_PROMPT = "这个视频是做饭、烹饪、美食教程吗？请只回答是或否"
         answer = client.get_ai_summary(resolved_url, keyword=DETECT_PROMPT)
         is_cooking = answer and "是" in answer
@@ -109,9 +111,12 @@ class DouyinService:
                 "message": f"非做饭视频 (answer={answer})",
             }
 
-        output_path = Path(output_dir)
+        url_hash = hashlib.sha256(resolved_url.encode()).hexdigest()[:16]
+        subdir = Path(output_dir) / url_hash
+        subdir.mkdir(parents=True, exist_ok=True)
+
         video_path, info = client.download_video(
-            resolved_url, output_path=output_path, ai_summary=True
+            resolved_url, output_path=subdir, ai_summary=True
         )
 
         recipe_text = extract_recipe_from_summary(info.get("ai_summary") or "")

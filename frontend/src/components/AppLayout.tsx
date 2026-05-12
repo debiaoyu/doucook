@@ -1,34 +1,75 @@
 import { useState, createContext, useEffect, useRef, useCallback } from 'react'
-import { Outlet, useNavigate } from 'react-router-dom'
-import { Layout, Input, Button, Typography, Modal, Dropdown, message, Spin, Upload, Space } from 'antd'
+import { Outlet, useNavigate, useSearchParams } from 'react-router-dom'
+import { Layout, Input, Button, Typography, Modal, Dropdown, message, Spin, Space } from 'antd'
 import {
   PlusOutlined,
   SearchOutlined,
   UserOutlined,
   CheckCircleFilled,
   QrcodeOutlined,
-  UploadOutlined,
   KeyOutlined,
   InboxOutlined,
+  ImportOutlined,
 } from '@ant-design/icons'
-import type { UploadProps } from 'antd'
-import { colors, shadows, borderRadius } from '../theme'
+import { colors, shadows, borderRadius, spacing } from '../theme'
 import ImportPage from '../pages/ImportPage'
-import { startLogin, getLoginStatus, cancelLogin, getSettings, updateSettings, uploadCookiesFile } from '../api'
-
-const { Dragger } = Upload
+import FloatingImportOverlay from './FloatingImportOverlay'
+import {
+  startLogin, getLoginStatus, cancelLogin, getSettings, updateSettings, uploadCookiesFile,
+  batchImportStream, importUrlStream, cancelBatchImport,
+} from '../api'
 
 const { Header, Content } = Layout
 const { Text } = Typography
 
-export interface ImportContextType {
-  openImport: () => void
+export interface ImportResult {
+  is_cooking?: boolean
+  confidence?: number
+  title?: string
+  message?: string
+  recipe_id?: number
+  duplicate?: boolean
+  error?: string
 }
 
-export const ImportContext = createContext<ImportContextType>({ openImport: () => {} })
+export interface ImportTask {
+  id: string
+  type: 'url' | 'batch'
+  importing: boolean
+  source?: string
+  url?: string
+  backendTaskId?: string
+  progress: { current: number; total: number; currentTitle: string; step?: string }
+  results: ImportResult[]
+}
+
+export interface ImportContextType {
+  openImport: () => void
+  startBatchImport: (source: string) => void
+  startUrlImport: (url: string) => void
+  isImporting: boolean
+  importTasks: ImportTask[]
+  refreshKey: number
+}
+
+export const ImportContext = createContext<ImportContextType>({
+  openImport: () => {},
+  startBatchImport: () => {},
+  startUrlImport: () => {},
+  isImporting: false,
+  importTasks: [],
+  refreshKey: 0,
+})
+
+let taskIdCounter = 0
+function nextTaskId() {
+  taskIdCounter += 1
+  return `task-${taskIdCounter}-${Date.now()}`
+}
 
 export default function AppLayout() {
   const navigate = useNavigate()
+  const [searchParams] = useSearchParams()
   const [importModalOpen, setImportModalOpen] = useState(false)
 
   const [loggedIn, setLoggedIn] = useState(false)
@@ -52,6 +93,12 @@ export default function AppLayout() {
 
   const [searchValue, setSearchValue] = useState('')
 
+  const [importTasks, setImportTasks] = useState<ImportTask[]>([])
+  const [importVisible, setImportVisible] = useState(false)
+  const [overlayMinimized, setOverlayMinimized] = useState(false)
+  const abortControllers = useRef<Map<string, AbortController>>(new Map())
+  const [recipeRefreshKey, setRecipeRefreshKey] = useState(0)
+
   const loadStatus = useCallback(async () => {
     try {
       const res = await getSettings()
@@ -73,16 +120,146 @@ export default function AppLayout() {
 
   useEffect(() => { loadStatus() }, [loadStatus])
 
+  useEffect(() => {
+    const q = searchParams.get('search')
+    setSearchValue(q || '')
+  }, [searchParams])
+
   const handleSearch = (val: string) => {
     if (val.trim()) {
       const params = new URLSearchParams(window.location.search)
       params.set('search', val.trim())
       navigate(`/?${params.toString()}`)
-      setSearchValue('')
+      setSearchValue(val.trim())
     }
   }
 
-  const openImport = useCallback(() => setImportModalOpen(true), [])
+  const handleSearchClear = () => {
+    navigate('/')
+    setSearchValue('')
+  }
+
+  const openImport = useCallback(() => { setImportModalOpen(true) }, [])
+
+  function updateTask(taskId: string, patch: Partial<ImportTask>) {
+    setImportTasks((prev) => prev.map((t) => t.id === taskId ? { ...t, ...patch } : t))
+  }
+
+  const startBatchImport = useCallback(async (source: string) => {
+    const taskId = nextTaskId()
+    const task: ImportTask = {
+      id: taskId,
+      type: 'batch',
+      source,
+      importing: true,
+      progress: { current: 0, total: 0, currentTitle: '正在扫描...', step: '' },
+      results: [],
+    }
+    setImportTasks((prev) => [...prev, task])
+    setImportVisible(true)
+    setOverlayMinimized(false)
+    setImportModalOpen(false)
+
+    const controller = new AbortController()
+    abortControllers.current.set(taskId, controller)
+
+    try {
+      await batchImportStream(
+        { source },
+        (event: any) => {
+          if (event.task_id && !task.backendTaskId) {
+            updateTask(taskId, { backendTaskId: event.task_id })
+          }
+          switch (event.type) {
+            case 'scanning':
+              updateTask(taskId, { progress: { current: 0, total: 0, currentTitle: '正在扫描收藏列表...', step: '' } })
+              break
+            case 'init':
+              updateTask(taskId, { progress: { current: 0, total: event.total, currentTitle: '准备导入...', step: '' } })
+              break
+            case 'progress':
+              updateTask(taskId, {
+                progress: { current: event.current, total: event.total, currentTitle: event.title || '', step: '' },
+              })
+              break
+            case 'result':
+              setImportTasks((prev) => prev.map((t) =>
+                t.id === taskId ? { ...t, results: [...t.results, event.result] } : t
+              ))
+              setRecipeRefreshKey((k) => k + 1)
+              break
+            case 'complete':
+              break
+            case 'error':
+              message.error(event.message || '导入出错')
+              break
+          }
+        },
+        controller.signal,
+      )
+    } catch (e: any) {
+      if (e.name !== 'AbortError') {
+        message.error(e.message || '批量导入失败')
+      }
+    } finally {
+      updateTask(taskId, { importing: false })
+      abortControllers.current.delete(taskId)
+    }
+  }, [])
+
+  const startUrlImport = useCallback(async (url: string) => {
+    const taskId = nextTaskId()
+    const task: ImportTask = {
+      id: taskId,
+      type: 'url',
+      url,
+      importing: true,
+      progress: { current: 0, total: 0, currentTitle: '', step: '检测视频...' },
+      results: [],
+    }
+    setImportTasks((prev) => [...prev, task])
+    setImportVisible(true)
+    setOverlayMinimized(false)
+    setImportModalOpen(false)
+
+    const controller = new AbortController()
+    abortControllers.current.set(taskId, controller)
+
+    try {
+      await importUrlStream(
+        { url },
+        (event: any) => {
+          switch (event.type) {
+            case 'detecting':
+              updateTask(taskId, { progress: { current: 0, total: 0, currentTitle: '', step: '检测视频...' } })
+              break
+            case 'ai_check':
+              updateTask(taskId, { progress: { current: 0, total: 0, currentTitle: '', step: 'AI 分析中...' } })
+              break
+            case 'complete':
+              setImportTasks((prev) => prev.map((t) =>
+                t.id === taskId ? { ...t, results: [...t.results, event.result] } : t
+              ))
+              setRecipeRefreshKey((k) => k + 1)
+              break
+            case 'error':
+              message.error(event.message || '导入失败')
+              break
+          }
+        },
+        controller.signal,
+      )
+    } catch (e: any) {
+      if (e.name !== 'AbortError') {
+        message.error(e.message || '导入失败')
+      }
+    } finally {
+      updateTask(taskId, { importing: false })
+      abortControllers.current.delete(taskId)
+    }
+  }, [])
+
+  const isImporting = importTasks.some((t) => t.importing)
 
   const handleStartLogin = async () => {
     setQrModalOpen(true)
@@ -104,12 +281,8 @@ export default function AppLayout() {
             setQrCode(`data:image/png;base64,${data.qr_code}`)
             setQrLoading(false)
           }
-          if (data.avatar_url) {
-            setAvatarUrl(data.avatar_url)
-          }
-          if (data.nickname) {
-            setNickname(data.nickname)
-          }
+          if (data.avatar_url) setAvatarUrl(data.avatar_url)
+          if (data.nickname) setNickname(data.nickname)
           if (data.status === 'success') {
             if (pollRef.current) clearInterval(pollRef.current)
             message.success('抖音登录成功！')
@@ -170,6 +343,27 @@ export default function AppLayout() {
     setQrCode(null)
   }
 
+  const handleDismissImport = () => {
+    abortControllers.current.forEach((c) => c.abort())
+    abortControllers.current.clear()
+    setImportTasks([])
+    setImportVisible(false)
+  }
+
+  const handleRemoveTask = useCallback((taskId: string) => {
+    const c = abortControllers.current.get(taskId)
+    if (c) { c.abort(); abortControllers.current.delete(taskId) }
+    setImportTasks((prev) => {
+      const task = prev.find((t) => t.id === taskId)
+      if (task?.backendTaskId && task.importing) {
+        cancelBatchImport(task.backendTaskId).catch(() => {})
+      }
+      const next = prev.filter((t) => t.id !== taskId)
+      if (next.length === 0) setImportVisible(false)
+      return next
+    })
+  }, [])
+
   const userMenuItems = [
     ...(nickname
       ? [{
@@ -221,7 +415,14 @@ export default function AppLayout() {
   ]
 
   return (
-    <ImportContext.Provider value={{ openImport }}>
+    <ImportContext.Provider value={{
+      openImport,
+      startBatchImport,
+      startUrlImport,
+      isImporting,
+      importTasks,
+      refreshKey: recipeRefreshKey,
+    }}>
       <Layout style={{ minHeight: '100vh', background: 'transparent' }}>
         <Header
           style={{
@@ -252,16 +453,10 @@ export default function AppLayout() {
             onMouseLeave={(e) => { e.currentTarget.style.opacity = '1' }}
           >
             <div style={{
-              width: 34,
-              height: 34,
-              borderRadius: 8,
+              width: 34, height: 34, borderRadius: 8,
               background: `linear-gradient(135deg, ${colors.primary}, ${colors.accent})`,
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              fontSize: 18,
-              color: colors.white,
-              fontWeight: 700,
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              fontSize: 18, color: colors.white, fontWeight: 700,
               fontFamily: 'var(--font-display)',
               boxShadow: shadows.warm,
               animation: 'pulseGlow 3s ease-in-out infinite',
@@ -269,11 +464,9 @@ export default function AppLayout() {
               豆
             </div>
             <span style={{
-              fontSize: 20,
-              fontWeight: 400,
+              fontSize: 20, fontWeight: 400,
               fontFamily: 'var(--font-display)',
-              color: colors.textPrimary,
-              letterSpacing: 2,
+              color: colors.textPrimary, letterSpacing: 2,
               transition: 'color 0.3s ease',
             }}>
               doucook
@@ -286,6 +479,7 @@ export default function AppLayout() {
             value={searchValue}
             onChange={(e) => setSearchValue(e.target.value)}
             onPressEnter={() => handleSearch(searchValue)}
+            onClear={handleSearchClear}
             style={{
               maxWidth: 360,
               borderRadius: borderRadius.pill,
@@ -333,7 +527,7 @@ export default function AppLayout() {
         </Header>
 
         <Content style={{ margin: '28px auto', maxWidth: 1200, width: '100%', padding: '0 24px', animation: 'fadeIn 0.5s ease' }}>
-          <Outlet />
+          <Outlet context={{ recipeRefreshKey }} />
         </Content>
 
         <Modal
@@ -349,7 +543,13 @@ export default function AppLayout() {
           destroyOnClose
           styles={{ body: { padding: 20 } }}
         >
-          <ImportPage onClose={() => setImportModalOpen(false)} onStartLogin={handleStartLogin} />
+          <ImportPage
+            onClose={() => setImportModalOpen(false)}
+            onStartLogin={handleStartLogin}
+            cookiesFile={cookiesFile}
+            cookiesValid={cookiesValid}
+            loggedIn={loggedIn}
+          />
         </Modal>
 
         <Modal
@@ -364,11 +564,7 @@ export default function AppLayout() {
             <Button
               key="cancel"
               onClick={handleCancelLogin}
-              style={{
-                borderRadius: borderRadius.button,
-                fontFamily: 'var(--font-body)',
-                border: `1px solid ${colors.border}`,
-              }}
+              style={{ borderRadius: borderRadius.button, fontFamily: 'var(--font-body)', border: `1px solid ${colors.border}` }}
             >
               {qrStatus === 'success' ? '关闭' : '取消'}
             </Button>,
@@ -381,36 +577,18 @@ export default function AppLayout() {
               <div style={{ padding: '60px 0' }}>
                 <Spin size="large" style={{ color: colors.primary }} />
                 <div style={{ marginTop: 16, color: colors.textSecondary, fontFamily: 'var(--font-body)', fontSize: 13 }}>
-                  正在获取二维码...
+                  {qrMessage || '正在获取二维码...'}
                 </div>
               </div>
             )}
             {qrCode && (
               <div>
-                <div style={{
-                  display: 'inline-block',
-                  padding: 12,
-                  background: '#fff',
-                  borderRadius: 12,
-                  boxShadow: shadows.md,
-                }}>
-                  <img
-                    src={qrCode}
-                    alt="抖音登录二维码"
-                    style={{ width: 220, height: 220, display: 'block', borderRadius: 4 }}
-                  />
+                <div style={{ display: 'inline-block', padding: 12, background: '#fff', borderRadius: 12, boxShadow: shadows.md }}>
+                  <img src={qrCode} alt="抖音登录二维码" style={{ width: 220, height: 220, display: 'block', borderRadius: 4 }} />
                 </div>
                 {qrStatus === 'waiting_scan' && (
                   <div>
-                    <div style={{
-                      marginTop: 16, padding: '10px 20px',
-                      background: colors.primaryLight,
-                      borderRadius: borderRadius.button,
-                      fontSize: 13,
-                      color: colors.textPrimary,
-                      fontFamily: 'var(--font-body)',
-                      border: `1px solid ${colors.primary}22`,
-                    }}>
+                    <div style={{ marginTop: 16, padding: '10px 20px', background: colors.primaryLight, borderRadius: borderRadius.button, fontSize: 13, color: colors.textPrimary, fontFamily: 'var(--font-body)', border: `1px solid ${colors.primary}22` }}>
                       请使用抖音 App 扫描二维码登录
                     </div>
                     <Text type="secondary" style={{ fontSize: 11, display: 'block', marginTop: 8, color: colors.textMuted }}>
@@ -422,15 +600,7 @@ export default function AppLayout() {
             )}
             {!qrLoading && !qrCode && ['error', 'timeout', 'cancelled'].includes(qrStatus) && (
               <div style={{ padding: '40px 0' }}>
-                <div style={{
-                  padding: '10px 20px',
-                  background: qrStatus === 'error' ? '#fef2f0' : colors.primaryLight,
-                  borderRadius: borderRadius.button,
-                  fontSize: 13,
-                  color: colors.textPrimary,
-                  fontFamily: 'var(--font-body)',
-                  border: qrStatus === 'error' ? '1px solid #f5c6bb' : `1px solid ${colors.primary}22`,
-                }}>
+                <div style={{ padding: '10px 20px', background: qrStatus === 'error' ? '#fef2f0' : colors.primaryLight, borderRadius: borderRadius.button, fontSize: 13, color: colors.textPrimary, fontFamily: 'var(--font-body)', border: qrStatus === 'error' ? '1px solid #f5c6bb' : `1px solid ${colors.primary}22` }}>
                   {qrStatus === 'error' && `登录失败：${qrMessage}`}
                   {qrStatus === 'timeout' && '扫码超时，请重试'}
                   {qrStatus === 'cancelled' && '已取消'}
@@ -455,39 +625,19 @@ export default function AppLayout() {
         >
           <div style={{ fontFamily: 'var(--font-body)' }}>
             <Text style={{ display: 'block', marginBottom: 16, color: colors.textSecondary, fontSize: 13, lineHeight: 1.6 }}>
-              上传从浏览器或 dousub 导出的 Cookies 文件（.txt 格式），
-              或直接输入已存在服务器上的文件路径。
+              上传从浏览器或 dousub 导出的 Cookies 文件（.txt 格式），或直接输入已存在服务器上的文件路径。
             </Text>
-
             <div style={{
               border: `2px dashed ${cookiesDragging ? colors.primary : colors.borderLight}`,
-              borderRadius: borderRadius.card,
-              padding: 32,
-              textAlign: 'center',
+              borderRadius: borderRadius.card, padding: 32, textAlign: 'center',
               background: cookiesDragging ? colors.primaryLight : colors.bg,
-              transition: 'all 0.25s ease',
-              cursor: 'pointer',
-              marginBottom: 20,
+              transition: 'all 0.25s ease', cursor: 'pointer', marginBottom: 20,
             }}
               onDragEnter={() => setCookiesDragging(true)}
               onDragLeave={() => setCookiesDragging(false)}
               onDragOver={(e) => e.preventDefault()}
-              onDrop={(e) => {
-                e.preventDefault()
-                setCookiesDragging(false)
-                const file = e.dataTransfer.files[0]
-                if (file) handleUploadCookiesFile(file)
-              }}
-              onClick={() => {
-                const input = document.createElement('input')
-                input.type = 'file'
-                input.accept = '.txt'
-                input.onchange = (e: any) => {
-                  const file = e.target?.files?.[0]
-                  if (file) handleUploadCookiesFile(file)
-                }
-                input.click()
-              }}
+              onDrop={(e) => { e.preventDefault(); setCookiesDragging(false); const file = e.dataTransfer.files[0]; if (file) handleUploadCookiesFile(file) }}
+              onClick={() => { const input = document.createElement('input'); input.type = 'file'; input.accept = '.txt'; input.onchange = (e: any) => { const file = e.target?.files?.[0]; if (file) handleUploadCookiesFile(file) }; input.click() }}
             >
               <InboxOutlined style={{ fontSize: 40, color: cookiesDragging ? colors.primary : colors.textMuted, marginBottom: 12, display: 'block' }} />
               <Text style={{ display: 'block', color: cookiesDragging ? colors.primary : colors.textSecondary, fontSize: 14, fontWeight: 500 }}>
@@ -495,13 +645,11 @@ export default function AppLayout() {
               </Text>
               <Text style={{ display: 'block', color: colors.textMuted, fontSize: 12, marginTop: 6 }}>支持 .txt 格式的 Cookies 文件</Text>
             </div>
-
             <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 16 }}>
               <div style={{ flex: 1, height: 1, background: colors.borderLight }} />
               <Text style={{ color: colors.textMuted, fontSize: 12 }}>或者直接输入路径</Text>
               <div style={{ flex: 1, height: 1, background: colors.borderLight }} />
             </div>
-
             <Space.Compact style={{ width: '100%', marginBottom: 16 }}>
               <Input
                 placeholder="输入 Cookies 文件路径..."
@@ -510,42 +658,17 @@ export default function AppLayout() {
                 onPressEnter={handleImportCookiesPath}
                 style={{ fontFamily: 'var(--font-body)', borderRadius: `${borderRadius.button}px 0 0 ${borderRadius.button}px` }}
               />
-              <Button
-                type="primary"
-                onClick={handleImportCookiesPath}
-                disabled={!cookiesPathInput.trim()}
-                style={{ borderRadius: `0 ${borderRadius.button}px ${borderRadius.button}px 0`, fontFamily: 'var(--font-body)' }}
-              >
+              <Button type="primary" onClick={handleImportCookiesPath} disabled={!cookiesPathInput.trim()} style={{ borderRadius: `0 ${borderRadius.button}px ${borderRadius.button}px 0`, fontFamily: 'var(--font-body)' }}>
                 设置
               </Button>
             </Space.Compact>
-
             {cookiesFile && (
-              <div style={{
-                padding: '10px 14px',
-                background: colors.primaryLight,
-                borderRadius: borderRadius.button,
-                fontSize: 12,
-                color: colors.textSecondary,
-                border: `1px solid ${colors.primary}22`,
-                wordBreak: 'break-all',
-              }}>
+              <div style={{ padding: '10px 14px', background: colors.primaryLight, borderRadius: borderRadius.button, fontSize: 12, color: colors.textSecondary, border: `1px solid ${colors.primary}22`, wordBreak: 'break-all' }}>
                 <Text style={{ fontSize: 12, color: colors.textMuted, fontFamily: 'var(--font-body)' }}>当前路径：</Text>
                 <Text style={{ fontSize: 12, color: colors.textSecondary, fontFamily: 'var(--font-body)' }}>{cookiesFile}</Text>
-                <Button
-                  type="link"
-                  danger
-                  size="small"
-                  style={{ float: 'right', fontSize: 12, padding: 0, marginTop: -2 }}
+                <Button type="link" danger size="small" style={{ float: 'right', fontSize: 12, padding: 0, marginTop: -2 }}
                   onClick={async () => {
-                    try {
-                      await updateSettings({ cookies_file: null })
-                      message.success('已清除 Cookies')
-                      setCookiesModalOpen(false)
-                      loadStatus()
-                    } catch {
-                      message.error('清除失败')
-                    }
+                    try { await updateSettings({ cookies_file: null }); message.success('已清除 Cookies'); setCookiesModalOpen(false); loadStatus() } catch { message.error('清除失败') }
                   }}
                 >
                   清除
@@ -555,6 +678,16 @@ export default function AppLayout() {
           </div>
         </Modal>
       </Layout>
+
+      <FloatingImportOverlay
+        visible={importVisible}
+        tasks={importTasks}
+        minimized={overlayMinimized}
+        onMinimize={() => setOverlayMinimized(true)}
+        onDismiss={handleDismissImport}
+        onRemoveTask={handleRemoveTask}
+        onViewRecipe={(id) => navigate(`/recipes/${id}`)}
+      />
     </ImportContext.Provider>
   )
 }

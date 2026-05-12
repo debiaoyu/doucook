@@ -9,6 +9,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from .database import engine, Base, get_db
 from .models import Recipe, Category, QAPair, ImportLog
 from .routers import recipes, import_routes, search, notes, ai, settings, video, auth
+from .settings_store import load_settings
 
 _env_data = os.environ.get("DOUCOOK_DATA_DIR")
 if _env_data:
@@ -25,6 +26,9 @@ async def lifespan(app: FastAPI):
     (DATA_DIR / "videos").mkdir(exist_ok=True)
     (DATA_DIR / "thumbnails").mkdir(exist_ok=True)
     Base.metadata.create_all(bind=engine)
+    saved = load_settings()
+    if saved.get("cookies_file"):
+        os.environ["DOUSUB_COOKIES_FILE"] = saved["cookies_file"]
     yield
 
 

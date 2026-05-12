@@ -90,6 +90,40 @@ export const listCategories = () => api.get<Category[]>('/recipes/categories/lis
 export const importFromUrl = (data: { url: string; cookies_file?: string }) =>
   api.post('/import/url', data)
 
+export async function importUrlStream(
+  data: { url: string; cookies_file?: string },
+  onEvent: (event: Record<string, any>) => void,
+  signal?: AbortSignal,
+): Promise<void> {
+  const response = await fetch('/api/import/url/stream', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data),
+    signal,
+  })
+  if (!response.ok) {
+    const err = await response.json().catch(() => ({ detail: '请求失败' }))
+    throw new Error(err.detail || '请求失败')
+  }
+  const reader = response.body!.getReader()
+  const decoder = new TextDecoder()
+  let buffer = ''
+  while (true) {
+    const { done, value } = await reader.read()
+    if (done) break
+    buffer += decoder.decode(value, { stream: true })
+    const lines = buffer.split('\n')
+    buffer = lines.pop() || ''
+    for (const line of lines) {
+      if (line.startsWith('data: ')) {
+        try {
+          onEvent(JSON.parse(line.slice(6)))
+        } catch { /* skip malformed */ }
+      }
+    }
+  }
+}
+
 export const importManual = (data: {
   title: string
   url?: string
@@ -186,5 +220,8 @@ export const cancelLogin = (loginId: string) =>
 
 export const checkLogin = () =>
   api.get<{ logged_in: boolean; cookies_file: string; avatar_url?: string; nickname?: string }>('/auth/check')
+
+export const cancelBatchImport = (backendTaskId: string) =>
+  api.post(`/import/batch/${backendTaskId}/cancel`)
 
 export default api

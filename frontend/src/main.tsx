@@ -9,8 +9,8 @@ import { colors, borderRadius, shadows, spacing } from './theme'
 const globalStyle = document.createElement('style')
 globalStyle.textContent = `
   :root {
-    --font-display: 'ZCOOL QingKe HuangYou', 'Noto Serif SC', serif;
-    --font-body: 'Noto Serif SC', 'Songti SC', serif;
+    --font-display: 'Noto Serif SC', 'STSong', 'SimSun', 'PingFang SC', 'Microsoft YaHei', serif;
+    --font-body: -apple-system, 'PingFang SC', 'Microsoft YaHei', 'Noto Sans SC', sans-serif;
     --bg-warm: ${colors.bg};
     --text-primary: ${colors.textPrimary};
     --text-secondary: ${colors.textSecondary};
@@ -20,17 +20,23 @@ globalStyle.textContent = `
   }
 
   * {
+    outline: none !important;
     scrollbar-width: thin;
     scrollbar-color: ${colors.border} transparent;
   }
+  *:focus { outline: none !important; }
+  *:focus-visible { outline: none !important; }
+  ::selection { background: transparent; }
   ::-webkit-scrollbar { width: 6px; height: 6px; }
   ::-webkit-scrollbar-track { background: transparent; }
   ::-webkit-scrollbar-thumb { background: ${colors.border}; border-radius: 3px; }
   ::-webkit-scrollbar-thumb:hover { background: ${colors.textMuted}; }
 
   body {
+    user-select: none;
+    -webkit-user-select: none;
     font-family: var(--font-body);
-    font-weight: 500;
+    font-weight: 400;
     background: ${colors.bg};
     background-image: radial-gradient(ellipse at 15% 40%, ${colors.primaryGlow} 0%, transparent 55%),
       radial-gradient(ellipse at 85% 60%, ${colors.primaryGlow} 0%, transparent 55%),
@@ -91,6 +97,11 @@ globalStyle.textContent = `
     animation: pulseGlow 2s ease-in-out infinite;
   }
 
+  input, textarea, [contenteditable] {
+    user-select: text;
+    -webkit-user-select: text;
+  }
+
   .ant-btn {
     font-family: var(--font-body) !important;
     font-weight: 500 !important;
@@ -117,11 +128,6 @@ globalStyle.textContent = `
     border-radius: ${borderRadius.card}px !important;
     border: 1px solid ${colors.borderLight} !important;
     background: ${colors.white} !important;
-  }
-
-  .ant-card-hoverable:hover {
-    transform: translateY(-6px) !important;
-    box-shadow: ${shadows.cardHover} !important;
   }
 
   .ant-card .ant-card-cover {
@@ -316,6 +322,80 @@ globalStyle.textContent = `
 
   .ant-steps {
     animation: fadeIn 0.3s ease both;
+  }
+
+  .markdown-body {
+    font-family: var(--font-body);
+    line-height: 1.8;
+    color: ${colors.textSecondary};
+  }
+  .markdown-body h1, .markdown-body h2, .markdown-body h3, .markdown-body h4 {
+    font-family: var(--font-body);
+    color: ${colors.textPrimary};
+    font-weight: 600;
+    margin: 1.2em 0 0.6em;
+  }
+  .markdown-body h1 { font-size: 1.3em; }
+  .markdown-body h2 { font-size: 1.15em; }
+  .markdown-body h3 { font-size: 1.05em; }
+  .markdown-body p { margin: 0 0 0.8em; }
+  .markdown-body ul, .markdown-body ol { padding-left: 1.5em; margin: 0.4em 0; }
+  .markdown-body li { margin: 0.3em 0; }
+  .markdown-body strong { color: ${colors.textPrimary}; font-weight: 600; }
+  .markdown-body code {
+    background: ${colors.bg};
+    padding: 2px 6px;
+    border-radius: 4px;
+    font-size: 0.9em;
+    color: ${colors.primary};
+  }
+  .markdown-body pre {
+    background: ${colors.bg};
+    padding: 14px 16px;
+    border-radius: 8px;
+    overflow-x: auto;
+    border: 1px solid ${colors.borderLight};
+    margin: 0.8em 0;
+  }
+  .markdown-body pre code {
+    background: none;
+    padding: 0;
+    color: ${colors.textSecondary};
+  }
+  .markdown-body blockquote {
+    border-left: 3px solid ${colors.primary};
+    margin: 0.8em 0;
+    padding: 6px 16px;
+    background: ${colors.primaryLight};
+    border-radius: 0 6px 6px 0;
+    color: ${colors.textSecondary};
+  }
+  .markdown-body table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 0.8em 0;
+  }
+  .markdown-body th, .markdown-body td {
+    border: 1px solid ${colors.borderLight};
+    padding: 8px 12px;
+    text-align: left;
+  }
+  .markdown-body th {
+    background: ${colors.bg};
+    font-weight: 600;
+    color: ${colors.textPrimary};
+  }
+  .markdown-body hr {
+    border: none;
+    border-top: 1px solid ${colors.borderLight};
+    margin: 1.2em 0;
+  }
+  .markdown-body a {
+    color: ${colors.primary};
+    text-decoration: none;
+  }
+  .markdown-body a:hover {
+    text-decoration: underline;
   }
 `
 document.head.appendChild(globalStyle)

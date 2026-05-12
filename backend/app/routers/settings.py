@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session
 from ..database import get_db
 from ..schemas import SettingsOut, SettingsUpdate
 from ..services.auth_service import check_login_status
+from ..settings_store import save_settings
 
 router = APIRouter(prefix="/api/settings", tags=["settings"])
 
@@ -59,6 +60,10 @@ def update_settings(update: SettingsUpdate):
         os.environ["DOUSUB_COOKIES_FILE"] = _resolve_cookies_file(update.cookies_file)
     elif update.cookies_file is None and "DOUSUB_COOKIES_FILE" in os.environ:
         del os.environ["DOUSUB_COOKIES_FILE"]
+    try:
+        save_settings({"cookies_file": os.environ.get("DOUSUB_COOKIES_FILE")})
+    except Exception:
+        pass
     return _build_settings()
 
 
@@ -70,4 +75,5 @@ async def upload_cookies(file: UploadFile = File(...)):
     with open(dest, "wb") as f:
         f.write(content)
     os.environ["DOUSUB_COOKIES_FILE"] = dest
+    save_settings({"cookies_file": dest})
     return _build_settings()

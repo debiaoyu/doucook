@@ -14,6 +14,9 @@ DATA_DIR = os.environ.get("DOUCOOK_DATA_DIR") or os.path.join(os.path.dirname(os
 VIDEO_DIR = os.path.join(DATA_DIR, "videos")
 THUMB_DIR = os.path.join(DATA_DIR, "thumbnails")
 
+os.makedirs(VIDEO_DIR, exist_ok=True)
+os.makedirs(THUMB_DIR, exist_ok=True)
+
 
 def _get_video_hash(filepath: str) -> Optional[str]:
     try:
@@ -89,6 +92,21 @@ def import_from_url(
     cookies_file: Optional[str] = None,
 ) -> dict:
     service = DouyinService(cookies_file=cookies_file)
+
+    resolved_url = service.resolve_url(url)
+    existing = db.query(Recipe).filter(Recipe.douyin_url == resolved_url).first()
+    if existing:
+        log = ImportLog(
+            url=url,
+            title=existing.title,
+            source="douyin",
+            status="duplicate",
+            message=f"重复视频: {existing.title}",
+        )
+        db.add(log)
+        db.commit()
+        return {"duplicate": True, "existing_id": existing.id, "resolved_url": resolved_url}
+
     result = service.detect_and_download(url, VIDEO_DIR, cookies_file)
 
     log = ImportLog(
@@ -108,9 +126,7 @@ def import_from_url(
     file_hash = _get_video_hash(video_path) if video_path else None
 
     existing = None
-    if result.get("resolved_url"):
-        existing = db.query(Recipe).filter(Recipe.douyin_url == result["resolved_url"]).first()
-    if not existing and file_hash:
+    if file_hash:
         existing = db.query(Recipe).filter(Recipe.file_hash == file_hash).first()
 
     if existing:
@@ -153,7 +169,7 @@ def import_from_url(
     db.commit()
     db.refresh(recipe)
 
-    return {**result, "duplicate": False, "recipe_id": recipe.id, "tags": tags}
+    return {**result, "duplicate": False, "recipe_id": recipe.id, "tags": tags, "file_hash": file_hash}
 
 
 def import_manual(
