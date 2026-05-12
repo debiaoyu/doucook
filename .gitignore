@@ -8,3 +8,7 @@ data/
 *.db
 .vscode/
 .idea/
+*.log
+nul
+backend/nul
+*.tsbuildinfo

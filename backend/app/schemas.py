@@ -32,6 +32,7 @@ class RecipeBase(BaseModel):
     title: Optional[str] = None
     notes: Optional[str] = None
     categories: Optional[list[str]] = None
+    tags: Optional[str] = None
     recipe_text: Optional[str] = None
 
 
@@ -48,6 +49,7 @@ class RecipeOut(BaseModel):
     ai_summary: Optional[str] = None
     recipe_text: Optional[str] = None
     notes: Optional[str] = None
+    tags: Optional[str] = None
     file_hash: Optional[str] = None
     created_at: Optional[datetime.datetime] = None
     updated_at: Optional[datetime.datetime] = None
@@ -68,6 +70,7 @@ class RecipeListItem(BaseModel):
     confidence: Optional[float] = None
     video_duration: Optional[float] = None
     created_at: Optional[datetime.datetime] = None
+    tags: Optional[str] = None
     categories: list[CategoryOut] = []
 
     class Config:
@@ -78,11 +81,14 @@ class RecipeUpdate(BaseModel):
     title: Optional[str] = None
     notes: Optional[str] = None
     recipe_text: Optional[str] = None
+    tags: Optional[str] = None
     categories: Optional[list[str]] = None
 
 
+from pydantic import Field
+
 class ImportURLInput(BaseModel):
-    url: str
+    url: str = Field(min_length=1)
     cookies_file: Optional[str] = None
 
 
@@ -121,8 +127,31 @@ class SearchResult(BaseModel):
 class SettingsOut(BaseModel):
     cookies_file: Optional[str] = None
     data_dir: str
-    categories: list[CategoryOut]
+    cookies_valid: Optional[bool] = None
+    avatar_url: Optional[str] = None
+    nickname: Optional[str] = None
 
 
 class SettingsUpdate(BaseModel):
     cookies_file: Optional[str] = None
+
+
+class LoginStartResponse(BaseModel):
+    login_id: str
+    status: str
+
+
+class LoginStatusResponse(BaseModel):
+    status: str
+    qr_code: Optional[str] = None
+    message: str = ""
+    cookies_file: Optional[str] = None
+    avatar_url: Optional[str] = None
+    nickname: Optional[str] = None
+
+
+class LoginCheckResponse(BaseModel):
+    logged_in: bool
+    cookies_file: str
+    avatar_url: Optional[str] = None
+    nickname: Optional[str] = None

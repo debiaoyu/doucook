@@ -8,11 +8,15 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from .database import engine, Base, get_db
 from .models import Recipe, Category, QAPair, ImportLog
-from .routers import recipes, import_routes, search, notes, ai, settings, video
+from .routers import recipes, import_routes, search, notes, ai, settings, video, auth
 
-PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
-DATA_DIR = PROJECT_ROOT / "data"
-STATIC_DIR = PROJECT_ROOT / "frontend" / "dist"
+_env_data = os.environ.get("DOUCOOK_DATA_DIR")
+if _env_data:
+    DATA_DIR = Path(_env_data)
+else:
+    PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
+    DATA_DIR = PROJECT_ROOT / "data"
+STATIC_DIR = DATA_DIR.parent / "frontend" / "dist"
 
 
 @asynccontextmanager
@@ -41,6 +45,7 @@ app.include_router(notes.router)
 app.include_router(ai.router)
 app.include_router(settings.router)
 app.include_router(video.router)
+app.include_router(auth.router)
 
 
 @app.get("/api/health")
@@ -54,4 +59,5 @@ if STATIC_DIR.exists():
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run("app.main:app", host="0.0.0.0", port=8000, reload=True)
+    port = int(os.environ.get("DOUCOOK_BACKEND_PORT", os.environ.get("DOUCOOK_PORT", "8899")))
+    uvicorn.run("app.main:app", host="0.0.0.0", port=port, reload=True)

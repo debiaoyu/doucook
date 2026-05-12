@@ -11,11 +11,15 @@ uvicorn app.main:app --reload --port 8000
 
 # Terminal 2 — frontend
 cd frontend && npm install
-npm run dev          # Vite on :3000, proxies /api → :8000
+npm run dev          # Vite on :3000, proxies /api → backend port
 npm run build        # tsc -b && vite build → frontend/dist/
 ```
 
 Backend serves `frontend/dist/` as static when present (production mode).
+
+## Port Auto-Fallback
+
+If port 8000 is occupied, both `start.bat` and `dev.sh` auto-detect the first available port in 8000–8010. Set `DOUCOOK_BACKEND_PORT` env var to force a specific port (e.g. `set DOUCOOK_BACKEND_PORT=9000` on Windows, or `export DOUCOOK_BACKEND_PORT=9000` on Linux/macOS). The frontend Vite proxy reads this env var to stay in sync.
 
 ## Architecture
 
@@ -64,7 +68,7 @@ data/      — doucook.db, videos/, thumbnails/ (auto-created)
 - **No state management** — component-local `useState`/`useEffect` only
 - **No CSS modules** — all styling is `style={{}}` inline objects
 - **CORS wide open** (`allow_origins=["*"]`)
-- **Video playback**: hardcoded `http://localhost:8000/api/video/${path}`
+- **Video playback**: served via Vite proxy at `/api/video/${path}` (relative URL)
 - **Cookies**: set via `DOUSUB_COOKIES_FILE` env var or Settings PUT endpoint
 - **Video storage**: `data/videos/`, thumbnails in `data/thumbnails/`
 - **Duplicate detection**: `file_hash` column on Recipe model, set during import

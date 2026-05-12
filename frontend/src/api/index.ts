@@ -15,6 +15,7 @@ export interface RecipeListItem {
   confidence: number | null
   video_duration: number | null
   created_at: string | null
+  tags: string | null
   categories: { id: number; name: string; color: string | null }[]
 }
 
@@ -39,6 +40,7 @@ export interface RecipeDetail {
   ai_summary: string | null
   recipe_text: string | null
   notes: string | null
+  tags: string | null
   file_hash: string | null
   created_at: string | null
   updated_at: string | null
@@ -74,6 +76,7 @@ export const updateRecipe = (id: number, data: {
   title?: string
   notes?: string
   recipe_text?: string
+  tags?: string
   categories?: string[]
 }) => api.patch<RecipeDetail>(`/recipes/${id}`, data)
 
@@ -96,7 +99,41 @@ export const importManual = (data: {
 }) => api.post('/import/manual', data)
 
 export const batchImport = (data: { source: string; cookies_file?: string }) =>
-  api.post('/import/batch', data)
+  api.post('/import/batch', data, { timeout: 120000 })
+
+export async function batchImportStream(
+  data: { source: string; cookies_file?: string },
+  onEvent: (event: Record<string, any>) => void,
+  signal?: AbortSignal,
+): Promise<void> {
+  const response = await fetch('/api/import/batch', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data),
+    signal,
+  })
+  if (!response.ok) {
+    const err = await response.json().catch(() => ({ detail: '请求失败' }))
+    throw new Error(err.detail || '请求失败')
+  }
+  const reader = response.body!.getReader()
+  const decoder = new TextDecoder()
+  let buffer = ''
+  while (true) {
+    const { done, value } = await reader.read()
+    if (done) break
+    buffer += decoder.decode(value, { stream: true })
+    const lines = buffer.split('\n')
+    buffer = lines.pop() || ''
+    for (const line of lines) {
+      if (line.startsWith('data: ')) {
+        try {
+          onEvent(JSON.parse(line.slice(6)))
+        } catch { /* skip malformed */ }
+      }
+    }
+  }
+}
 
 // Search
 export const searchRecipes = (params: {
@@ -122,5 +159,32 @@ export const getQaHistory = (recipeId: number) =>
 
 // Settings
 export const getSettings = () => api.get('/settings')
+export const updateSettings = (data: { cookies_file: string | null }) =>
+  api.put<{ cookies_file: string | null; data_dir: string; cookies_valid: boolean | null }>('/settings', data)
+export const uploadCookiesFile = (file: File) => {
+  const formData = new FormData()
+  formData.append('file', file)
+  return api.post<{ cookies_file: string | null; data_dir: string; cookies_valid: boolean | null }>('/settings/cookies', formData)
+}
+
+// Auth
+export const startLogin = (timeout = 120) =>
+  api.post<{ login_id: string; status: string }>('/auth/login', null, { params: { timeout } })
+
+export const getLoginStatus = (loginId: string) =>
+  api.get<{
+    status: string
+    qr_code?: string
+    message: string
+    cookies_file?: string
+    avatar_url?: string
+    nickname?: string
+  }>(`/auth/login/${loginId}`)
+
+export const cancelLogin = (loginId: string) =>
+  api.post(`/auth/login/${loginId}/cancel`)
+
+export const checkLogin = () =>
+  api.get<{ logged_in: boolean; cookies_file: string; avatar_url?: string; nickname?: string }>('/auth/check')
 
 export default api

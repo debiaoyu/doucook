@@ -27,6 +27,7 @@ class Recipe(Base):
     ai_summary = Column(Text, nullable=True)
     recipe_text = Column(Text, nullable=True)
     notes = Column(Text, nullable=True)
+    tags = Column(Text, nullable=True)
     file_hash = Column(String(64), nullable=True, index=True)
     created_at = Column(DateTime, default=datetime.datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow)
