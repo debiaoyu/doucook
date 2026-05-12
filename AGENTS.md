@@ -62,11 +62,15 @@ data/      — doucook.db, videos/, thumbnails/ (auto-created)
 
 ## Key Details
 
-- **Design tokens**: colors, spacing, borderRadius in `frontend/src/theme.ts`
-- **Theme**: Ant Design `ConfigProvider` with `#e67e22` orange primary in `main.tsx`
+- **Design tokens**: comprehensive design system in `frontend/src/theme.ts`
+  - 🎨 **Colors**: primary color palette, category colors, gradients
+  - 📐 **Spacing**: 8px grid system (xs to xxxl)
+  - 🌟 **Shadows**: multi-level shadow system with theme-specific effects
+  - 🔘 **BorderRadius**: consistent rounding for all components
+- **Theme**: Ant Design `ConfigProvider` with enhanced warm orange theme
 - **All UI in Chinese** (antd locale zh_CN, hardcoded strings)
 - **No state management** — component-local `useState`/`useEffect` only
-- **No CSS modules** — all styling is `style={{}}` inline objects
+- **No CSS modules** — all styling is `style={{}}` inline objects with design tokens
 - **CORS wide open** (`allow_origins=["*"]`)
 - **Video playback**: served via Vite proxy at `/api/video/${path}` (relative URL)
 - **Cookies**: set via `DOUSUB_COOKIES_FILE` env var or Settings PUT endpoint
