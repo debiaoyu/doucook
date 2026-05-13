@@ -2,6 +2,16 @@
 
 dou cook = 豆厨 —— 抖音菜谱管理器。粘贴抖音链接，自动检测是否为做饭视频，下载视频并通过 AI 生成文字菜谱。
 
+## 截图
+
+| 菜谱列表 | 菜谱详情 |
+|---|---|
+| <img src="screenshots/01-homepage.png" alt="菜谱列表" width="400"/> | <img src="screenshots/02-recipe-detail.png" alt="菜谱详情" width="400"/> |
+
+| 导入菜谱 | AI 智能问答 | 搜索筛选 |
+|---|---|---|
+| <img src="screenshots/03-import.png" alt="导入菜谱" width="270"/> | <img src="screenshots/04-recipe-ai.png" alt="AI 智能问答" width="270"/> | <img src="screenshots/05-search.png" alt="搜索筛选" width="270"/> |
+
 ## 功能
 
 - **URL 导入** — 粘贴抖音视频链接，自动检测是否为做饭视频，下载并生成菜谱
